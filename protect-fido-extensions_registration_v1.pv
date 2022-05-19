@@ -1,0 +1,81 @@
+
+channel c.
+
+(* Diffie Helman *)
+type G.
+type exponent.
+const g:G.
+
+fun exp(G,exponent):G.
+equation forall x: exponent, y: exponent; exp(exp(g,x),y) = exp(exp(g,y),x).
+
+(* Signature *)
+type signKey.
+type verifyKey.
+
+fun vk(signKey):verifyKey.
+fun sign(bitstring,signKey):bitstring.
+reduc forall m:bitstring,k:signKey;checksign(m,sign(m,k),vk(k)) = true.
+
+(* Define private key for key exchange to test on secrecy *)
+free dh_priv_RP:exponent [private].
+free dh_priv_AU:exponent [private].
+
+(* Events *)
+event registerAU(G).
+event registerRP(G).
+
+(* Secrecy of shared key *)
+query attacker(exp(exp(g,dh_priv_AU),dh_priv_RP)).
+query attacker(exp(exp(g,dh_priv_RP),dh_priv_AU)).
+
+(* Authenticity AU->RP is injective, because RP can detect replay attacks by the nonce *)
+query x:G; inj-event(registerRP(x))==>inj-event(registerAU(x)).
+
+(* Process macros *)
+let relyingParty(pubKeyAttestation:verifyKey) =  
+    new nonceRP:bitstring;
+
+    (* DH public key by RP *)
+    let dh_pub_RP = exp(g,dh_priv_RP) in
+
+    (* Send register request*)
+	out(c,(nonceRP,dh_pub_RP)); 
+    
+    (* Receive register response*)
+    in(c,(nonceAU:bitstring,credPubKey:verifyKey,dh_pub_AU:G,signatureRegistration:bitstring));
+
+    (* Verify registration signature using a known attestation public key *)
+    let (=true) = checksign((nonceRP,credPubKey,dh_pub_AU),signatureRegistration,pubKeyAttestation) in 
+    
+    (* Derive shared secret using public key from AU and private key from RP *)
+    let sharedSecret = exp(dh_pub_AU,dh_priv_RP) in
+    
+    event registerRP(sharedSecret).
+
+let authenticator(privKeyAttestation:signKey) =  
+
+    (* Receive register request*)
+    in(c,(nonce:bitstring,dh_pub_RP:G));
+ 
+    (* New credential *)
+    new credPrivKey:signKey; 
+    let credPubKey = vk(credPrivKey) in
+
+    (* DH public key by AU *)
+    let dh_pub_AU = exp(g,dh_priv_AU) in
+
+    (* Derive shared secret using public key from RP and private key from AU *)
+    let sharedSecret = exp(dh_pub_RP,dh_priv_AU) in
+    event registerAU(sharedSecret);
+   
+    (* Create attestation statement with signature using attestation key*)
+    let signatureRegistration = sign((nonce,credPubKey,dh_pub_AU),privKeyAttestation) in
+
+    (* Send register response *)
+    out(c,(credPubKey,dh_pub_AU,signatureRegistration)).
+
+process     
+    new privKeyAttestation:signKey;
+    let pubKeyAttestation = vk(privKeyAttestation) in
+    ((!relyingParty(pubKeyAttestation))|(!authenticator(privKeyAttestation)))

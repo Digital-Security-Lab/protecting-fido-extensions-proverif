@@ -1,0 +1,101 @@
+
+channel c.
+
+(* Symmetric encryption *)
+type key.
+
+fun senc(bitstring,key): bitstring.
+reduc forall m: bitstring, k: key; sdec(senc(m,k),k) = m.
+
+(* Signature *)
+type signKey.
+type verifyKey.
+
+fun vk(signKey):verifyKey.
+fun sign(bitstring,signKey):bitstring.
+reduc forall m:bitstring, k:signKey; checksign(m,sign(m,k),vk(k)) = true.
+
+(* Type converters*)
+fun key2Bitstring(key):bitstring [typeConverter].
+fun bitstring2Key(bitstring):key [typeConverter].
+
+(* Define Assertions globally to test secrecy *)
+free AssertionInputExtensions:bitstring [private].
+free AssertionOutputExtensions:bitstring [private].
+
+(* Events *)
+event receiveOutputExtensionsRP(bitstring).
+event sendOutputExtensionsAU(bitstring).
+event receiveInputExtensionsAU(bitstring).
+event sendInputExtensionsRP(bitstring).
+
+(* Secrecy of extensions *)
+query attacker(AssertionInputExtensions).
+query attacker(AssertionOutputExtensions).
+
+(* Authenticity RP->AU, replay attacks possible, but only valid messages from server will be accepted *)
+query x:bitstring; event(receiveInputExtensionsAU(x))==>event(sendInputExtensionsRP(x)).
+
+(* Authenticity AU->RP is injective, because RP can detect replay attacks by the nonce *)
+query x:bitstring; inj-event(receiveOutputExtensionsRP(x))==>inj-event(sendOutputExtensionsAU(x)).
+
+
+
+(* Process macros *)
+let relyingParty(credPubKey:verifyKey,sharedKey:key) =  
+
+    new nonceRP:bitstring;
+    
+    (* Use new content encryption key (cek) to encryptinput extensions *)
+    new cekRP:key;
+    let inputExtensions_enc = senc(AssertionInputExtensions,cekRP) in
+
+    (* Encrypt cek with shared key(s) respectively *)
+    let cekRP_enc = senc(key2Bitstring(cekRP), sharedKey) in
+    
+    event sendInputExtensionsRP(AssertionInputExtensions);
+
+    (* Send assertion request *)
+	out(c,(nonceRP,cekRP_enc,inputExtensions_enc));
+    
+    (* Receive assertion response *)
+    in(c,(nonceAU:bitstring,outputExtensions_enc:bitstring,signatureAssertion:bitstring));
+
+    (* Verify assertion signature using credential public key by the respective authenticator *)
+    let (=true) = checksign((nonceRP,outputExtensions_enc),signatureAssertion,credPubKey) in 
+    
+    (* Sign message with credential private key *)
+    let outputExtensions = sdec(outputExtensions_enc,sharedKey) in
+
+    event receiveOutputExtensionsRP(outputExtensions)
+    .
+
+let authenticator(credPrivKey:signKey,sharedKey:key) =  
+    (* Receive assertion request *)
+	in(c,(nonce:bitstring,cekRP_enc:bitstring,inputExtensions_enc:bitstring));
+    
+    (* Decrypt cek with shared key *)
+    let cekRP = bitstring2Key(sdec(cekRP_enc,sharedKey)) in
+
+    (* Decrypt input extensions with cek *)
+    let inputExtensions = sdec(inputExtensions_enc,cekRP) in
+    
+    event receiveInputExtensionsAU(inputExtensions);
+    
+    (* Use shared key to encrypt output extensions *)
+    let outputExtensions_enc = senc(AssertionOutputExtensions,sharedKey) in
+
+    (* Sign message with credential private key *)
+    let signatureAssertion = sign((nonce,outputExtensions_enc),credPrivKey) in
+
+    event sendOutputExtensionsAU(AssertionOutputExtensions);
+
+    (* Send assertion response *)
+    out(c,(nonce,outputExtensions_enc,signatureAssertion))
+    .
+
+process 
+    new sharedKey:key;
+    new credPrivKey:signKey;
+    let credPubKey = vk(credPrivKey) in
+    ((!relyingParty(credPubKey,sharedKey))|(!authenticator(credPrivKey,sharedKey)))
