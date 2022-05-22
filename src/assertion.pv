@@ -47,16 +47,16 @@ let relyingParty(credPubKey:verifyKey,sharedKey:key) =
     new nonceRP:bitstring;
     
     (* Use new content encryption key (cek) to encryptinput extensions *)
-    new cekRP:key;
-    let inputExtensions_enc = senc(AssertionInputExtensions,cekRP) in
+    new cek:key;
+    let inputExtensions_enc = senc(AssertionInputExtensions,cek) in
 
     (* Encrypt cek with shared key(s) respectively *)
-    let cekRP_enc = senc(key2Bitstring(cekRP), sharedKey) in
+    let cek_enc = senc(key2Bitstring(cek), sharedKey) in
     
     event sendInputExtensionsRP(AssertionInputExtensions);
 
     (* Send assertion request *)
-	out(c,(nonceRP,cekRP_enc,inputExtensions_enc));
+	out(c,(nonceRP,cek_enc,inputExtensions_enc));
     
     (* Receive assertion response *)
     in(c,(nonceAU:bitstring,outputExtensions_enc:bitstring,signatureAssertion:bitstring));
@@ -64,7 +64,7 @@ let relyingParty(credPubKey:verifyKey,sharedKey:key) =
     (* Verify assertion signature using credential public key by the respective authenticator *)
     let (=true) = checksign((nonceRP,outputExtensions_enc),signatureAssertion,credPubKey) in 
     
-    (* Sign message with credential private key *)
+    (* Decrypt output extensions using the shared key *)
     let outputExtensions = sdec(outputExtensions_enc,sharedKey) in
 
     event receiveOutputExtensionsRP(outputExtensions)
@@ -72,13 +72,13 @@ let relyingParty(credPubKey:verifyKey,sharedKey:key) =
 
 let authenticator(credPrivKey:signKey,sharedKey:key) =  
     (* Receive assertion request *)
-	in(c,(nonce:bitstring,cekRP_enc:bitstring,inputExtensions_enc:bitstring));
+	in(c,(nonce:bitstring,cek_enc:bitstring,inputExtensions_enc:bitstring));
     
     (* Decrypt cek with shared key *)
-    let cekRP = bitstring2Key(sdec(cekRP_enc,sharedKey)) in
+    let cek = bitstring2Key(sdec(cek_enc,sharedKey)) in
 
     (* Decrypt input extensions with cek *)
-    let inputExtensions = sdec(inputExtensions_enc,cekRP) in
+    let inputExtensions = sdec(inputExtensions_enc,cek) in
     
     event receiveInputExtensionsAU(inputExtensions);
     
