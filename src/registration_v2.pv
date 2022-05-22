@@ -9,6 +9,13 @@ const g:G.
 fun exp(G,exponent):G.
 equation forall x: exponent, y: exponent; exp(exp(g,x),y) = exp(exp(g,y),x).
 
+fun publicKey(exponent):G.
+equation forall x: exponent; publicKey(x) = exp(g,x).
+
+fun computeSecret(G,exponent):G.
+equation forall x: exponent, y: exponent; computeSecret(publicKey(x),y) = computeSecret(publicKey(y),x).
+
+
 (* Signature *)
 type signKey.
 type verifyKey.
@@ -26,8 +33,8 @@ event registerAU(G).
 event registerRP(G).
 
 (* Secrecy of shared key *)
-query attacker(exp(exp(g,dh_priv_AU),dh_priv_RP)).
-query attacker(exp(exp(g,dh_priv_RP),dh_priv_AU)).
+query attacker(computeSecret(publicKey(dh_priv_AU),dh_priv_RP)).
+query attacker(computeSecret(publicKey(dh_priv_RP),dh_priv_AU)).
 
 (* Authenticity AU->RP is injective, because RP can detect replay attacks by the nonce *)
 query x:G; inj-event(registerRP(x))==>inj-event(registerAU(x)).
@@ -37,7 +44,7 @@ let relyingParty(pubKeyAttestation:verifyKey) =
     new nonceRP:bitstring;
 
     (* DH public key by RP *)
-    let dh_pub_RP = exp(g,dh_priv_RP) in
+    let dh_pub_RP = publicKey(dh_priv_RP) in
 
     (* Send register request*)
 	out(c,(nonceRP,dh_pub_RP)); 
@@ -49,7 +56,7 @@ let relyingParty(pubKeyAttestation:verifyKey) =
     let (=true) = checksign((nonceRP,credPubKey,dh_pub_AU,dh_pub_RP),signatureRegistration,pubKeyAttestation) in 
     
     (* Derive shared secret using public key from AU and private key from RP *)
-    let sharedSecret = exp(dh_pub_AU,dh_priv_RP) in
+    let sharedSecret = computeSecret(dh_pub_AU,dh_priv_RP) in
     
     event registerRP(sharedSecret).
 
@@ -63,10 +70,10 @@ let authenticator(privKeyAttestation:signKey) =
     let credPubKey = vk(credPrivKey) in
 
     (* DH public key by AU *)
-    let dh_pub_AU = exp(g,dh_priv_AU) in
+    let dh_pub_AU = publicKey(dh_priv_AU) in
 
     (* Derive shared secret using public key from RP and private key from AU *)
-    let sharedSecret = exp(dh_pub_RP,dh_priv_AU) in
+    let sharedSecret = computeSecret(dh_pub_RP,dh_priv_AU) in
     event registerAU(sharedSecret);
    
     (* Create attestation statement with signature using attestation key*)
